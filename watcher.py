@@ -91,7 +91,7 @@ class FileState:
                     # No header yet; position at current end
                     self.channels = []
                     self.pos = f.tell()
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             # File might race-disappear; ignore
             pass
 
@@ -99,7 +99,7 @@ class FileState:
         if not self.backfill:
             try:
                 self.pos = os.path.getsize(self.path)
-            except FileNotFoundError:
+            except (FileNotFoundError, PermissionError):
                 self.pos = 0
 
     def read_new_measurements(self) -> Iterable[Tuple[str, str, str, float, str]]:
@@ -110,7 +110,7 @@ class FileState:
         extra = os.path.basename(self.path)
         try:
             size = os.path.getsize(self.path)
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             return []
 
         # If truncated, reset position and remainder
@@ -207,7 +207,7 @@ class FileState:
 
                 # Advance position by number of bytes we consumed
                 self.pos += len(raw_chunk)
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             # File vanished mid-read
             return []
 
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser(description="Watch BenchVue CSV directory and print new measurements")
-    ap.add_argument("directory", nargs="?", default=os.environ.get("BENCHVUE_DIR", "."))
+    ap.add_argument("directory", nargs="?", default=os.environ.get("BENCHVUE_DIR", r"C:\\Users\\qris\\Documents\\LEMS\\Keysight logs"))
     ap.add_argument("--backfill", action="store_true", help="Process existing file contents at startup")
     ap.add_argument("--interval", type=float, default=7.4, help="Polling interval in seconds")
     args = ap.parse_args()

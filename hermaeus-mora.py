@@ -29,7 +29,7 @@ import watcher
 
 # Default database path (override with BENCHVUE_DB env var if desired)
 DEFAULT_DB_PATH = os.environ.get(
-    "BENCHVUE_DB", os.path.join(os.getcwd(), "benchvue.sqlite3")
+    "BENCHVUE_DB", r"C:\\Users\\qris\\py_automations\\data_log\\benchvue.sqlite3"
 )
 
 
@@ -86,7 +86,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--dir",
         dest="directory",
-        default=os.environ.get("BENCHVUE_DIR", os.getcwd()),
+        default=os.environ.get("BENCHVUE_DIR", r"C:\\Users\\qris\\Documents\\LEMS\\Keysight logs"),
         help="Directory to watch for AutoExportTrace_*.csv",
     )
     parser.add_argument(

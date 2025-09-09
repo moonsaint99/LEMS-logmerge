@@ -43,3 +43,9 @@ Quick check with the included examples
 Notes
 - The watcher starts at end-of-file by default to avoid duplicate inserts when restarting. Use `--backfill` if you want to ingest historical data present at startup.
 - The script ignores non-numeric/blank values.
+
+Windows defaults and quick-start
+- Default watch dir: `C:\Users\qris\Documents\LEMS\Keysight logs`
+- Default DB path: `C:\Users\qris\py_automations\data_log\benchvue.sqlite3`
+- Wrapper: double-click or run `start-logger.cmd` to launch using `C:\Users\qris\winPython\WPy64-31241\python-3.12.4.amd64\python.exe`.
+- You can still pass extra arguments and they will be forwarded, e.g. `start-logger.cmd --backfill`.
