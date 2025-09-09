@@ -72,6 +72,43 @@ def _connect_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _has_unique_dedup_index(db: sqlite3.Connection) -> bool:
+    try:
+        rows = db.execute("PRAGMA index_list(samples)").fetchall()
+    except sqlite3.DatabaseError:
+        return False
+    for row in rows:
+        # row schema: seq, name, unique, origin, partial
+        name = row[1]
+        unique = row[2]
+        if unique != 1:
+            continue
+        try:
+            info = db.execute(f"PRAGMA index_info({name})").fetchall()
+        except sqlite3.DatabaseError:
+            continue
+        cols = [r[2] for r in info]
+        if cols == ["timestamp", "source", "channel"]:
+            return True
+    return False
+
+
+def _ensure_unique_index(db: sqlite3.Connection) -> bool:
+    if _has_unique_dedup_index(db):
+        return True
+    try:
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uniq_samples_key ON samples(timestamp, source, channel)"
+        )
+        db.commit()
+    except sqlite3.DatabaseError:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return _has_unique_dedup_index(db)
+
+
 def _insert_sample(
     db: sqlite3.Connection,
     ts: str,
@@ -79,17 +116,39 @@ def _insert_sample(
     channel: str,
     value,
     extra: Optional[str] = None,
+    use_or_ignore: bool = False,
 ):
-    db.execute(
-        (
-            "INSERT INTO samples (timestamp, source, channel, value, extra)\n"
-            "SELECT ?, ?, ?, ?, ?\n"
-            "WHERE NOT EXISTS (\n"
-            "  SELECT 1 FROM samples WHERE timestamp = ? AND source = ? AND channel = ?\n"
-            ")"
-        ),
-        (ts, source, channel, value, extra, ts, source, channel),
-    )
+    if use_or_ignore:
+        db.execute(
+            "INSERT OR IGNORE INTO samples (timestamp, source, channel, value, extra) VALUES (?, ?, ?, ?, ?)",
+            (ts, source, channel, value, extra),
+        )
+    else:
+        db.execute(
+            (
+                "INSERT INTO samples (timestamp, source, channel, value, extra)\n"
+                "SELECT ?, ?, ?, ?, ?\n"
+                "WHERE NOT EXISTS (\n"
+                "  SELECT 1 FROM samples WHERE timestamp = ? AND source = ? AND channel = ?\n"
+                ")"
+            ),
+            (ts, source, channel, value, extra, ts, source, channel),
+        )
+
+
+def _tune_for_backfill(db: sqlite3.Connection, aggressive: bool) -> None:
+    try:
+        if aggressive:
+            # Fastest but reduces durability during the run
+            db.execute("PRAGMA journal_mode=MEMORY")
+            db.execute("PRAGMA synchronous=OFF")
+        else:
+            # Safer defaults that are still faster for bulk loads
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("PRAGMA temp_store=MEMORY")
+    except sqlite3.DatabaseError:
+        pass
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -120,6 +179,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Disable per-insert progress indicator output",
     )
     parser.add_argument(
+        "--fast-backfill",
+        action="store_true",
+        help="Speed up backfill by relaxing SQLite durability settings",
+    )
+    parser.add_argument(
+        "--commit-rows",
+        type=int,
+        default=None,
+        help="Rows per commit (overrides auto-tuned defaults)",
+    )
+    parser.add_argument(
         "--backfill",
         action="store_true",
         help="Process existing lines already present in files at startup",
@@ -135,6 +205,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     signal.signal(signal.SIGTERM, _handle_sigint)
 
     db = _connect_db(args.db_path)
+    # Attempt to add a unique index to let us use INSERT OR IGNORE
+    has_unique = _ensure_unique_index(db)
+
+    # If we're doing backfill, tune SQLite for faster bulk loads
+    if args.backfill:
+        _tune_for_backfill(db, aggressive=args.fast_backfill)
 
     attempts = 0
     base_changes = 0
@@ -143,8 +219,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     except Exception:
         base_changes = 0
     last_commit = time.time()
+    # Auto-tune default batching; allow override via --commit-rows
     commit_every = 250  # rows
     commit_seconds = 2.0  # seconds
+    if args.backfill and args.commit_rows is None:
+        commit_every = 5000 if args.fast_backfill else 1500
+        commit_seconds = 5.0 if args.fast_backfill else 3.0
+    if args.commit_rows is not None and args.commit_rows > 0:
+        commit_every = args.commit_rows
 
     try:
         show_progress = not args.no_progress
@@ -157,7 +239,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         ):
             # Track whether an insert actually occurred (dedupe may skip it)
             before = db.total_changes
-            _insert_sample(db, ts, source, channel, value, extra)
+            _insert_sample(db, ts, source, channel, value, extra, use_or_ignore=has_unique)
             after = db.total_changes
             attempts += 1
 
