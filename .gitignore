@@ -1,0 +1,4 @@
+example_csvs/AutoExportTrace_40 2025-06-02 08-52-27.csv
+__pycache__/*
+example_csvs/AutoExportTrace_iso 2025-06-02 10-45-43.csv
+*.sqlite3
