@@ -23,6 +23,11 @@ import sqlite3
 import sys
 import time
 from typing import Optional
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover - fallback if unavailable
+    ZoneInfo = None  # type: ignore
 
 import watcher
 
@@ -109,6 +114,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Polling interval in seconds",
     )
     parser.add_argument(
+        "--no-progress",
+        dest="no_progress",
+        action="store_true",
+        help="Disable per-insert progress indicator output",
+    )
+    parser.add_argument(
         "--backfill",
         action="store_true",
         help="Process existing lines already present in files at startup",
@@ -136,14 +147,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     commit_seconds = 2.0  # seconds
 
     try:
+        show_progress = not args.no_progress
+        az_tz = ZoneInfo("America/Phoenix") if ZoneInfo else None
         for ts, source, channel, value, extra in watcher.watch(
             args.directory,
             poll_interval=args.interval,
             backfill=args.backfill,
             should_stop=lambda: STOP,
         ):
+            # Track whether an insert actually occurred (dedupe may skip it)
+            before = db.total_changes
             _insert_sample(db, ts, source, channel, value, extra)
+            after = db.total_changes
             attempts += 1
+
+            if show_progress and after > before:
+                # Print a lightweight indicator with Arizona (America/Phoenix) time
+                now_dt = datetime.now(az_tz) if az_tz is not None else datetime.now()
+                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+                print(f"[{now_str}] +1 row -> {source} | {channel}", flush=True)
 
             now = time.time()
             if attempts % commit_every == 0 or (now - last_commit) >= commit_seconds:
