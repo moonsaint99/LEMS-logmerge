@@ -61,6 +61,7 @@ class FileState:
     backfill: bool = False
     header_found: bool = False
     channels: List[str] = field(default_factory=list)
+    channel_cols: List[int] = field(default_factory=list)
     pos: int = 0  # byte offset within file
     remainder: str = ""  # partial last line buffer
     encoding: str = "utf-8-sig"
@@ -83,12 +84,17 @@ class FileState:
                     row = next(csv.reader([line]))
                     # Detect header row robustly: second column literally says Scan Number
                     if row and len(row) > 1 and row[1].strip().lower() == "scan number":
-                        # Row format: ["Scan Sweep Time (Sec)", "Scan Number", <channels...>]
-                        ch = [c.strip() for c in row[2:]]
-                        # Trim trailing empties
-                        while ch and ch[-1] == "":
-                            ch.pop()
-                        self.channels = ch
+                        # Capture only non-empty channel names and their absolute column indexes
+                        ch_names: List[str] = []
+                        ch_cols: List[int] = []
+                        for idx in range(2, len(row)):
+                            name = row[idx].strip()
+                            if name == "":
+                                continue
+                            ch_names.append(name)
+                            ch_cols.append(idx)
+                        self.channels = ch_names
+                        self.channel_cols = ch_cols
                         self.header_found = True
                         break
                 # Position after header line or end
@@ -143,10 +149,16 @@ class FileState:
                             continue
                         row = next(csv.reader([line]))
                         if row and len(row) > 1 and row[1].strip().lower() == "scan number":
-                            ch = [c.strip() for c in row[2:]]
-                            while ch and ch[-1] == "":
-                                ch.pop()
-                            self.channels = ch
+                            ch_names: List[str] = []
+                            ch_cols: List[int] = []
+                            for idx in range(2, len(row)):
+                                name = row[idx].strip()
+                                if name == "":
+                                    continue
+                                ch_names.append(name)
+                                ch_cols.append(idx)
+                            self.channels = ch_names
+                            self.channel_cols = ch_cols
                             self.header_found = True
                             break
 
@@ -173,10 +185,16 @@ class FileState:
                     # Skip until header appears
                     if not self.header_found:
                         if row and len(row) > 1 and row[1].strip().lower() == "scan number":
-                            ch = [c.strip() for c in row[2:]]
-                            while ch and ch[-1] == "":
-                                ch.pop()
-                            self.channels = ch
+                            ch_names: List[str] = []
+                            ch_cols: List[int] = []
+                            for idx in range(2, len(row)):
+                                name = row[idx].strip()
+                                if name == "":
+                                    continue
+                                ch_names.append(name)
+                                ch_cols.append(idx)
+                            self.channels = ch_names
+                            self.channel_cols = ch_cols
                             self.header_found = True
                         continue
 
@@ -189,26 +207,20 @@ class FileState:
                         int(scan_str)
                     except Exception:
                         continue
-                    # Expect: [timestamp, scan_number, v1, v2, ...]
-                    values = row[2:]
-                    # Trim trailing empties to align with channels properly
-                    while values and values[-1].strip() == "":
-                        values.pop()
-                    # If channels are known, require full alignment to avoid partial/garbled rows
-                    if self.channels and len(values) < len(self.channels):
+                    # Emit values by absolute column positions bound to named channels
+                    if not self.channels or not self.channel_cols:
                         continue
-                    # Align values to channels
-                    n = len(self.channels) if self.channels else len(values)
-                    for i in range(n):
-                        v = values[i].strip()
+                    for name, col in zip(self.channels, self.channel_cols):
+                        if col >= len(row):
+                            continue
+                        v = row[col].strip()
                         if v == "":
                             continue
                         try:
                             val = float(v)
                         except ValueError:
                             continue
-                        ch = self.channels[i] if self.channels else f"CH{i+1}"
-                        produced.append((ts, self.source, ch, val, extra))
+                        produced.append((ts, self.source, name, val, extra))
 
                 # Advance position by number of bytes we consumed
                 self.pos += len(raw_chunk)
