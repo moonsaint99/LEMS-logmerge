@@ -23,11 +23,6 @@ import sqlite3
 import sys
 import time
 from typing import Optional
-from datetime import datetime
-try:
-    from zoneinfo import ZoneInfo  # Python 3.9+
-except Exception:  # pragma: no cover - fallback if unavailable
-    ZoneInfo = None  # type: ignore
 
 import watcher
 
@@ -230,7 +225,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         show_progress = not args.no_progress
-        az_tz = ZoneInfo("America/Phoenix") if ZoneInfo else None
         for ts, source, channel, value, extra in watcher.watch(
             args.directory,
             poll_interval=args.interval,
@@ -244,10 +238,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             attempts += 1
 
             if show_progress and after > before:
-                # Print a lightweight indicator with Arizona (America/Phoenix) time
-                now_dt = datetime.now(az_tz) if az_tz is not None else datetime.now()
-                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-                print(f"[{now_str}] +1 row -> {source} | {channel}", flush=True)
+                # Show the raw CSV row timestamp with no conversion
+                print(f"[{ts}] +1 row -> {source} | {channel}", flush=True)
 
             now = time.time()
             if attempts % commit_every == 0 or (now - last_commit) >= commit_seconds:
