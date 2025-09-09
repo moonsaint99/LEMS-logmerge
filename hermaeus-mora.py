@@ -76,8 +76,14 @@ def _insert_sample(
     extra: Optional[str] = None,
 ):
     db.execute(
-        "INSERT INTO samples (timestamp, source, channel, value, extra) VALUES (?, ?, ?, ?, ?)",
-        (ts, source, channel, value, extra),
+        (
+            "INSERT INTO samples (timestamp, source, channel, value, extra)\n"
+            "SELECT ?, ?, ?, ?, ?\n"
+            "WHERE NOT EXISTS (\n"
+            "  SELECT 1 FROM samples WHERE timestamp = ? AND source = ? AND channel = ?\n"
+            ")"
+        ),
+        (ts, source, channel, value, extra, ts, source, channel),
     )
 
 
@@ -119,7 +125,12 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     db = _connect_db(args.db_path)
 
-    inserted = 0
+    attempts = 0
+    base_changes = 0
+    try:
+        base_changes = db.total_changes
+    except Exception:
+        base_changes = 0
     last_commit = time.time()
     commit_every = 250  # rows
     commit_seconds = 2.0  # seconds
@@ -132,10 +143,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             should_stop=lambda: STOP,
         ):
             _insert_sample(db, ts, source, channel, value, extra)
-            inserted += 1
+            attempts += 1
 
             now = time.time()
-            if inserted % commit_every == 0 or (now - last_commit) >= commit_seconds:
+            if attempts % commit_every == 0 or (now - last_commit) >= commit_seconds:
                 db.commit()
                 last_commit = now
 
@@ -143,8 +154,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                 break
     finally:
         db.commit()
+        changes = 0
+        try:
+            changes = db.total_changes - base_changes
+        except Exception:
+            pass
         db.close()
-        print(f"Inserted rows: {inserted}")
+        print(f"Inserted rows: {changes}")
 
     return 0
 
