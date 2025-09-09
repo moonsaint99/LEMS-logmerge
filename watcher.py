@@ -81,9 +81,14 @@ class FileState:
                     except Exception:
                         continue
                     row = next(csv.reader([line]))
-                    if row and row[0].strip() == HEADER_LEADER:
+                    # Detect header row robustly: second column literally says Scan Number
+                    if row and len(row) > 1 and row[1].strip().lower() == "scan number":
                         # Row format: ["Scan Sweep Time (Sec)", "Scan Number", <channels...>]
-                        self.channels = [c.strip() for c in row[2:]]
+                        ch = [c.strip() for c in row[2:]]
+                        # Trim trailing empties
+                        while ch and ch[-1] == "":
+                            ch.pop()
+                        self.channels = ch
                         self.header_found = True
                         break
                 # Position after header line or end
@@ -137,8 +142,11 @@ class FileState:
                         except Exception:
                             continue
                         row = next(csv.reader([line]))
-                        if row and row[0].strip() == HEADER_LEADER:
-                            self.channels = [c.strip() for c in row[2:]]
+                        if row and len(row) > 1 and row[1].strip().lower() == "scan number":
+                            ch = [c.strip() for c in row[2:]]
+                            while ch and ch[-1] == "":
+                                ch.pop()
+                            self.channels = ch
                             self.header_found = True
                             break
 
@@ -164,36 +172,33 @@ class FileState:
                 for row in reader:
                     # Skip until header appears
                     if not self.header_found:
-                        if row and row[0].strip() == HEADER_LEADER:
-                            self.channels = [c.strip() for c in row[2:]]
+                        if row and len(row) > 1 and row[1].strip().lower() == "scan number":
+                            ch = [c.strip() for c in row[2:]]
+                            while ch and ch[-1] == "":
+                                ch.pop()
+                            self.channels = ch
                             self.header_found = True
                         continue
 
                     if not row or len(row) < 2:
                         continue
                     ts = row[0].strip()
-                    # Ignore any rows that don't look like timestamped readings
-                    if not ts or ts.lower().startswith((
-                        "address",
-                        "model",
-                        "serial",
-                        "firmware",
-                        "start time",
-                        "stop time",
-                        "data log",
-                        "instrument",
-                        "modules",
-                        "total channels",
-                        "channel configuration",
-                        "relay information",
-                        "scan control",
-                        "user description",
-                    )):
+                    # Use presence of a numeric scan number to accept the row
+                    scan_str = row[1].strip() if len(row) > 1 else ""
+                    try:
+                        int(scan_str)
+                    except Exception:
                         continue
                     # Expect: [timestamp, scan_number, v1, v2, ...]
                     values = row[2:]
-                    # If channels known, align values up to len(channels)
-                    n = min(len(values), len(self.channels)) if self.channels else len(values)
+                    # Trim trailing empties to align with channels properly
+                    while values and values[-1].strip() == "":
+                        values.pop()
+                    # If channels are known, require full alignment to avoid partial/garbled rows
+                    if self.channels and len(values) < len(self.channels):
+                        continue
+                    # Align values to channels
+                    n = len(self.channels) if self.channels else len(values)
                     for i in range(n):
                         v = values[i].strip()
                         if v == "":
