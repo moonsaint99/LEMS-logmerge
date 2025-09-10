@@ -43,15 +43,22 @@ CSV_GLOB = "AutoExportTrace_*.csv"
 
 def _parse_source_from_filename(path: str) -> str:
     base = os.path.basename(path)
+    src: str
     m = FILENAME_SOURCE_RE.search(base)
     if m:
-        return m.group(1)
-    # fallback: use everything before first space after underscore
-    try:
-        after = base.split("AutoExportTrace_", 1)[1]
-        return after.split(" ", 1)[0]
-    except Exception:
-        return base
+        src = m.group(1)
+    else:
+        # fallback: use everything before first space after underscore
+        try:
+            after = base.split("AutoExportTrace_", 1)[1]
+            src = after.split(" ", 1)[0]
+        except Exception:
+            src = base
+
+    # Prepend with "DAQ" if not already present
+    if not src.lower().startswith("DAQ"):
+        src = f"DAQ{src}"
+    return src
 
 
 @dataclass
